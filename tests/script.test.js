@@ -1,130 +1,108 @@
 import script from '../src/script.mjs';
 
-describe('Job Template Script', () => {
+describe('Google Undelete Workforce User Script', () => {
   const mockContext = {
     env: {
       ENVIRONMENT: 'test'
     },
     secrets: {
-      API_KEY: 'test-api-key-123456'
+      GOOGLE_SERVICE_ACCOUNT_KEY: JSON.stringify({
+        client_email: 'test@project.iam.gserviceaccount.com',
+        private_key: '-----BEGIN PRIVATE KEY-----\ntest\n-----END PRIVATE KEY-----',
+        project_id: 'test-project'
+      })
     },
-    outputs: {},
-    partial_results: {},
-    current_step: 'start'
+    outputs: {}
   };
 
+  // Simple mocking approach for ES6 modules
+  const mockRequest = () => Promise.resolve({ status: 200, data: {} });
+
+  beforeEach(() => {
+    // Mock console to avoid noise in tests
+    global.console.log = () => {};
+    global.console.error = () => {};
+  });
+
   describe('invoke handler', () => {
-    test('should execute successfully with minimal params', async () => {
+    test('should throw error for missing workforcePoolId', async () => {
       const params = {
-        target: 'test-user@example.com',
-        action: 'create'
+        subjectId: 'user456'
       };
 
-      const result = await script.invoke(params, mockContext);
-
-      expect(result.status).toBe('success');
-      expect(result.target).toBe('test-user@example.com');
-      expect(result.action).toBe('create');
-      expect(result.status).toBeDefined();
-      expect(result.processed_at).toBeDefined();
-      expect(result.options_processed).toBe(0);
+      await expect(script.invoke(params, mockContext))
+        .rejects.toThrow('Invalid or missing workforcePoolId parameter');
     });
 
-    test('should handle dry run mode', async () => {
+    test('should throw error for missing subjectId', async () => {
       const params = {
-        target: 'test-user@example.com',
-        action: 'delete',
-        dry_run: true
+        workforcePoolId: 'pool123'
       };
 
-      const result = await script.invoke(params, mockContext);
-
-      expect(result.status).toBe('dry_run_completed');
-      expect(result.target).toBe('test-user@example.com');
-      expect(result.action).toBe('delete');
+      await expect(script.invoke(params, mockContext))
+        .rejects.toThrow('Invalid or missing subjectId parameter');
     });
 
-    test('should process options array', async () => {
+    test('should throw error for missing service account key', async () => {
       const params = {
-        target: 'test-group',
-        action: 'update',
-        options: ['force', 'notify', 'audit']
+        workforcePoolId: 'pool123',
+        subjectId: 'user456'
       };
 
-      const result = await script.invoke(params, mockContext);
-
-      expect(result.status).toBe('success');
-      expect(result.target).toBe('test-group');
-      expect(result.options_processed).toBe(3);
-    });
-
-    test('should handle context with previous job outputs', async () => {
-      const contextWithOutputs = {
+      const contextWithoutKey = {
         ...mockContext,
-        outputs: {
-          'create-user': {
-            user_id: '12345',
-            created_at: '2024-01-15T10:30:00Z'
-          },
-          'assign-groups': {
-            groups_assigned: 3
-          }
-        }
+        secrets: {}
       };
 
-      const params = {
-        target: 'user-12345',
-        action: 'finalize'
-      };
-
-      const result = await script.invoke(params, contextWithOutputs);
-
-      expect(result.status).toBe('success');
-      expect(result.target).toBe('user-12345');
-      expect(result.status).toBeDefined();
+      await expect(script.invoke(params, contextWithoutKey))
+        .rejects.toThrow('Missing required secret: GOOGLE_SERVICE_ACCOUNT_KEY');
     });
+
+    // Note: Testing actual Google API calls would require integration tests
+    // with real service account credentials
   });
 
   describe('error handler', () => {
-    test('should throw error by default', async () => {
+    test('should re-throw error for framework to handle', async () => {
       const params = {
-        target: 'test-user@example.com',
-        action: 'create',
-        error: {
-          message: 'Something went wrong',
-          code: 'ERROR_CODE'
-        }
+        workforcePoolId: 'pool123',
+        subjectId: 'user456',
+        error: new Error('Network timeout')
       };
 
-      await expect(script.error(params, mockContext)).rejects.toThrow('Unable to recover from error: Something went wrong');
+      await expect(script.error(params, mockContext))
+        .rejects.toThrow('Network timeout');
     });
   });
 
   describe('halt handler', () => {
     test('should handle graceful shutdown', async () => {
       const params = {
-        target: 'test-user@example.com',
+        workforcePoolId: 'pool123',
+        subjectId: 'user456',
         reason: 'timeout'
       };
 
       const result = await script.halt(params, mockContext);
 
-      expect(result.status).toBe('halted');
-      expect(result.target).toBe('test-user@example.com');
+      expect(result.workforcePoolId).toBe('pool123');
+      expect(result.subjectId).toBe('user456');
       expect(result.reason).toBe('timeout');
-      expect(result.halted_at).toBeDefined();
+      expect(result.haltedAt).toBeDefined();
+      expect(result.cleanupCompleted).toBe(true);
     });
 
-    test('should handle halt without target', async () => {
+    test('should handle halt with missing params', async () => {
       const params = {
         reason: 'system_shutdown'
       };
 
       const result = await script.halt(params, mockContext);
 
-      expect(result.status).toBe('halted');
-      expect(result.target).toBe('unknown');
+      expect(result.workforcePoolId).toBe('unknown');
+      expect(result.subjectId).toBe('unknown');
       expect(result.reason).toBe('system_shutdown');
+      expect(result.cleanupCompleted).toBe(true);
     });
   });
 });
