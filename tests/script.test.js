@@ -16,7 +16,7 @@ describe('Google Undelete Workforce User Script', () => {
   };
 
   // Simple mocking approach for ES6 modules
-  const mockRequest = () => Promise.resolve({ status: 200, data: {} });
+  // const mockRequest = () => Promise.resolve({ status: 200, data: {} });
 
   beforeEach(() => {
     // Mock console to avoid noise in tests
