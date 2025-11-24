@@ -1,5 +1,3 @@
-import { JWT } from 'google-auth-library';
-
 class RetryableError extends Error {
   constructor(message) {
     super(message);
@@ -14,29 +12,50 @@ class FatalError extends Error {
   }
 }
 
-async function undeleteWorkforceUser(workforcePoolId, subjectId, serviceAccountKey) {
-  const keyData = JSON.parse(serviceAccountKey);
-
-  const authClient = new JWT({
-    email: keyData.client_email,
-    key: keyData.private_key,
-    scopes: ['https://www.googleapis.com/auth/cloud-platform']
-  });
-
+async function undeleteWorkforceUser(workforcePoolId, subjectId) {
   const url = `https://iam.googleapis.com/v1/locations/global/workforcePools/${workforcePoolId}/subjects/${subjectId}:undelete`;
 
   console.log(`Undeleting workforce user: ${subjectId} from pool: ${workforcePoolId}`);
 
-  const response = await authClient.request({
-    url,
+  // Make the POST request - authentication is handled externally
+  const response = await fetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json'
     }
   });
 
+  if (!response.ok) {
+    // Handle error response
+    let errorData = null;
+    try {
+      errorData = await response.json();
+    } catch {
+      // Response might not be JSON
+    }
+
+    const error = new Error(errorData?.error?.message || `HTTP ${response.status}`);
+    error.response = {
+      status: response.status,
+      data: errorData
+    };
+    throw error;
+  }
+
   console.log(`Successfully undeleted workforce user: ${subjectId}`);
-  return response.data;
+
+  // Parse response data if available
+  let data = null;
+  try {
+    const text = await response.text();
+    if (text) {
+      data = JSON.parse(text);
+    }
+  } catch {
+    // Response might not be JSON or empty
+  }
+
+  return data;
 }
 
 function validateInputs(params) {
@@ -50,6 +69,44 @@ function validateInputs(params) {
 }
 
 export default {
+  /**
+   * Main execution handler - undeletes a workforce user
+   * @param {Object} params - Job input parameters
+   * @param {string} params.workforcePoolId - The workforce pool ID
+   * @param {string} params.subjectId - The subject/user ID to undelete
+   *
+   * @param {Object} context - Execution context with secrets and environment
+   *
+   * The configured auth type will determine which of the following environment variables and secrets are available
+   * @param {string} context.secrets.BEARER_AUTH_TOKEN
+   *
+   * @param {string} context.secrets.BASIC_USERNAME
+   * @param {string} context.secrets.BASIC_PASSWORD
+   *
+   * @param {string} context.secrets.OAUTH2_CLIENT_CREDENTIALS_CLIENT_SECRET
+   * @param {string} context.environment.OAUTH2_CLIENT_CREDENTIALS_AUDIENCE
+   * @param {string} context.environment.OAUTH2_CLIENT_CREDENTIALS_AUTH_STYLE
+   * @param {string} context.environment.OAUTH2_CLIENT_CREDENTIALS_CLIENT_ID
+   * @param {string} context.environment.OAUTH2_CLIENT_CREDENTIALS_SCOPE
+   * @param {string} context.environment.OAUTH2_CLIENT_CREDENTIALS_TOKEN_URL
+   *
+   * @param {string} context.secrets.OAUTH2_AUTHORIZATION_CODE_ACCESS_TOKEN
+   * @param {string} context.secrets.OAUTH2_AUTHORIZATION_CODE_AUTHORIZATION_CODE
+   * @param {string} context.secrets.OAUTH2_AUTHORIZATION_CODE_CLIENT_SECRET
+   * @param {string} context.secrets.OAUTH2_AUTHORIZATION_CODE_REFRESH_TOKEN
+   * @param {string} context.environment.OAUTH2_AUTHORIZATION_CODE_AUTH_STYLE
+   * @param {string} context.environment.OAUTH2_AUTHORIZATION_CODE_AUTH_URL
+   * @param {string} context.environment.OAUTH2_AUTHORIZATION_CODE_CLIENT_ID
+   * @param {string} context.environment.OAUTH2_AUTHORIZATION_CODE_LAST_TOKEN_ROTATION_TIMESTAMP
+   * @param {string} context.environment.OAUTH2_AUTHORIZATION_CODE_REDIRECT_URI
+   * @param {string} context.environment.OAUTH2_AUTHORIZATION_CODE_SCOPE
+   * @param {string} context.environment.OAUTH2_AUTHORIZATION_CODE_TOKEN_LIFETIME_FREQUENCY
+   * @param {string} context.environment.OAUTH2_AUTHORIZATION_CODE_TOKEN_ROTATION_FREQUENCY
+   * @param {string} context.environment.OAUTH2_AUTHORIZATION_CODE_TOKEN_ROTATION_INTERVAL
+   * @param {string} context.environment.OAUTH2_AUTHORIZATION_CODE_TOKEN_URL
+   *
+   * @returns {Object} Job results
+   */
   invoke: async (params, context) => {
     console.log('Starting Google Undelete Workforce User action');
 
@@ -61,12 +118,9 @@ export default {
       console.log(`Processing workforce pool: ${workforcePoolId}`);
       console.log(`Undeleting subject: ${subjectId}`);
 
-      if (!context.secrets?.GOOGLE_SERVICE_ACCOUNT_KEY) {
-        throw new FatalError('Missing required secret: GOOGLE_SERVICE_ACCOUNT_KEY');
-      }
-
+      // Authentication is handled by the external system
       try {
-        await undeleteWorkforceUser(workforcePoolId, subjectId, context.secrets.GOOGLE_SERVICE_ACCOUNT_KEY);
+        await undeleteWorkforceUser(workforcePoolId, subjectId);
 
         const result = {
           workforcePoolId,
