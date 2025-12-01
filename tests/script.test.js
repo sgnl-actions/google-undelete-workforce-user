@@ -2,11 +2,11 @@ import script from '../src/script.mjs';
 
 describe('Google Undelete Workforce User Script', () => {
   const mockContext = {
-    env: {
+    environment: {
       ENVIRONMENT: 'test'
     },
     secrets: {
-      // Authentication is handled externally, so we don't need specific credentials here
+      OAUTH2_AUTHORIZATION_CODE_ACCESS_TOKEN: 'test-google-access-token'
     },
     outputs: {}
   };
@@ -37,15 +37,6 @@ describe('Google Undelete Workforce User Script', () => {
   });
 
   describe('invoke handler', () => {
-    test('should throw error for missing workforcePoolId', async () => {
-      const params = {
-        subjectId: 'user456'
-      };
-
-      await expect(script.invoke(params, mockContext))
-        .rejects.toThrow('Invalid or missing workforcePoolId parameter');
-    });
-
     test('should throw error for missing subjectId', async () => {
       const params = {
         workforcePoolId: 'pool123'
@@ -55,21 +46,99 @@ describe('Google Undelete Workforce User Script', () => {
         .rejects.toThrow('Invalid or missing subjectId parameter');
     });
 
+    test('should throw error for missing workforcePoolId', async () => {
+      const params = {
+        subjectId: 'user456'
+      };
+
+      await expect(script.invoke(params, mockContext))
+        .rejects.toThrow('Invalid or missing workforcePoolId parameter');
+    });
+
     test('should successfully undelete a workforce user', async () => {
       const params = {
-        workforcePoolId: 'pool123',
-        subjectId: 'user456'
+        subjectId: 'user456',
+        workforcePoolId: 'pool123'
       };
 
       const result = await script.invoke(params, mockContext);
 
-      expect(result.workforcePoolId).toBe('pool123');
       expect(result.subjectId).toBe('user456');
+      expect(result.workforcePoolId).toBe('pool123');
       expect(result.undeleted).toBe(true);
       expect(result.undeletedAt).toBeDefined();
     });
 
-    // Note: Authentication is handled externally by the system
+    test('should use default Google IAM API URL when address not provided', async () => {
+      const params = {
+        subjectId: 'user456',
+        workforcePoolId: 'pool123'
+      };
+
+      let capturedUrl;
+      global.fetch = async (url, options) => {
+        capturedUrl = url;
+        return {
+          ok: true,
+          status: 200,
+          text: async () => ''
+        };
+      };
+
+      await script.invoke(params, mockContext);
+
+      expect(capturedUrl).toBe('https://iam.googleapis.com/v1/locations/global/workforcePools/pool123/subjects/user456:undelete');
+    });
+
+    test('should use address parameter when provided', async () => {
+      const params = {
+        subjectId: 'user456',
+        workforcePoolId: 'pool123',
+        address: 'https://custom.googleapis.com'
+      };
+
+      let capturedUrl;
+      global.fetch = async (url, options) => {
+        capturedUrl = url;
+        return {
+          ok: true,
+          status: 200,
+          text: async () => ''
+        };
+      };
+
+      await script.invoke(params, mockContext);
+
+      expect(capturedUrl).toBe('https://custom.googleapis.com/v1/locations/global/workforcePools/pool123/subjects/user456:undelete');
+    });
+
+    test('should use ADDRESS environment variable when address param not provided', async () => {
+      const params = {
+        subjectId: 'user456',
+        workforcePoolId: 'pool123'
+      };
+
+      const contextWithEnvAddress = {
+        ...mockContext,
+        environment: {
+          ADDRESS: 'https://env.googleapis.com'
+        }
+      };
+
+      let capturedUrl;
+      global.fetch = async (url, options) => {
+        capturedUrl = url;
+        return {
+          ok: true,
+          status: 200,
+          text: async () => ''
+        };
+      };
+
+      await script.invoke(params, contextWithEnvAddress);
+
+      expect(capturedUrl).toBe('https://env.googleapis.com/v1/locations/global/workforcePools/pool123/subjects/user456:undelete');
+    });
   });
 
   describe('error handler', () => {
