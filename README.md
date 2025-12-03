@@ -70,9 +70,6 @@ The configured auth type will determine which secrets are needed:
     "subjectId": "user@example.com",
     "workforcePoolId": "my-workforce-pool",
     "address": "https://iam.googleapis.com"
-  },
-  "environment": {
-    "LOG_LEVEL": "info"
   }
 }
 ```
@@ -230,15 +227,6 @@ This action uses the following Google Cloud IAM API endpoint:
 6. **User Already Active (400)**
    - This is treated as a success case - the user is already in an active state
    - No action is needed, the operation is idempotent
-
-## Version History
-
-### v1.0.0
-- Initial release
-- Support for workforce user undeletion via Google Cloud IAM API
-- Multiple authentication methods (Bearer, Basic, OAuth2 Client Credentials, OAuth2 Authorization Code)
-- Integration with @sgnl-actions/utils package
-- Idempotent operation support
 
 ## License
 
