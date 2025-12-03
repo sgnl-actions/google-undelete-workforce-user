@@ -1,84 +1,215 @@
 // SGNL Job Script - Auto-generated bundle
 'use strict';
 
-class RetryableError extends Error {
-  constructor(message) {
-    super(message);
-    this.retryable = true;
+/**
+ * SGNL Actions - Authentication Utilities
+ *
+ * Shared authentication utilities for SGNL actions.
+ * Supports: Bearer Token, Basic Auth, OAuth2 Client Credentials, OAuth2 Authorization Code
+ */
+
+/**
+ * Get OAuth2 access token using client credentials flow
+ * @param {Object} config - OAuth2 configuration
+ * @param {string} config.tokenUrl - Token endpoint URL
+ * @param {string} config.clientId - Client ID
+ * @param {string} config.clientSecret - Client secret
+ * @param {string} [config.scope] - OAuth2 scope
+ * @param {string} [config.audience] - OAuth2 audience
+ * @param {string} [config.authStyle] - Auth style: 'InParams' or 'InHeader' (default)
+ * @returns {Promise<string>} Access token
+ */
+async function getClientCredentialsToken(config) {
+  const { tokenUrl, clientId, clientSecret, scope, audience, authStyle } = config;
+
+  if (!tokenUrl || !clientId || !clientSecret) {
+    throw new Error('OAuth2 Client Credentials flow requires tokenUrl, clientId, and clientSecret');
   }
+
+  const params = new URLSearchParams();
+  params.append('grant_type', 'client_credentials');
+
+  if (scope) {
+    params.append('scope', scope);
+  }
+
+  if (audience) {
+    params.append('audience', audience);
+  }
+
+  const headers = {
+    'Content-Type': 'application/x-www-form-urlencoded',
+    'Accept': 'application/json'
+  };
+
+  if (authStyle === 'InParams') {
+    params.append('client_id', clientId);
+    params.append('client_secret', clientSecret);
+  } else {
+    const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
+    headers['Authorization'] = `Basic ${credentials}`;
+  }
+
+  const response = await fetch(tokenUrl, {
+    method: 'POST',
+    headers,
+    body: params.toString()
+  });
+
+  if (!response.ok) {
+    let errorText;
+    try {
+      const errorData = await response.json();
+      errorText = JSON.stringify(errorData);
+    } catch {
+      errorText = await response.text();
+    }
+    throw new Error(
+      `OAuth2 token request failed: ${response.status} ${response.statusText} - ${errorText}`
+    );
+  }
+
+  const data = await response.json();
+
+  if (!data.access_token) {
+    throw new Error('No access_token in OAuth2 response');
+  }
+
+  return data.access_token;
 }
 
-class FatalError extends Error {
-  constructor(message) {
-    super(message);
-    this.retryable = false;
+/**
+ * Get the Authorization header value from context using available auth method.
+ * Supports: Bearer Token, Basic Auth, OAuth2 Authorization Code, OAuth2 Client Credentials
+ *
+ * @param {Object} context - Execution context with environment and secrets
+ * @param {Object} context.environment - Environment variables
+ * @param {Object} context.secrets - Secret values
+ * @returns {Promise<string>} Authorization header value (e.g., "Bearer xxx" or "Basic xxx")
+ */
+async function getAuthorizationHeader(context) {
+  const env = context.environment || {};
+  const secrets = context.secrets || {};
+
+  // Method 1: Simple Bearer Token
+  if (secrets.BEARER_AUTH_TOKEN) {
+    const token = secrets.BEARER_AUTH_TOKEN;
+    return token.startsWith('Bearer ') ? token : `Bearer ${token}`;
   }
+
+  // Method 2: Basic Auth (username + password)
+  if (secrets.BASIC_PASSWORD && secrets.BASIC_USERNAME) {
+    const credentials = Buffer.from(`${secrets.BASIC_USERNAME}:${secrets.BASIC_PASSWORD}`).toString('base64');
+    return `Basic ${credentials}`;
+  }
+
+  // Method 3: OAuth2 Authorization Code - use pre-existing access token
+  if (secrets.OAUTH2_AUTHORIZATION_CODE_ACCESS_TOKEN) {
+    const token = secrets.OAUTH2_AUTHORIZATION_CODE_ACCESS_TOKEN;
+    return token.startsWith('Bearer ') ? token : `Bearer ${token}`;
+  }
+
+  // Method 4: OAuth2 Client Credentials - fetch new token
+  if (secrets.OAUTH2_CLIENT_CREDENTIALS_CLIENT_SECRET) {
+    const tokenUrl = env.OAUTH2_CLIENT_CREDENTIALS_TOKEN_URL;
+    const clientId = env.OAUTH2_CLIENT_CREDENTIALS_CLIENT_ID;
+    const clientSecret = secrets.OAUTH2_CLIENT_CREDENTIALS_CLIENT_SECRET;
+
+    if (!tokenUrl || !clientId) {
+      throw new Error('OAuth2 Client Credentials flow requires TOKEN_URL and CLIENT_ID in env');
+    }
+
+    const token = await getClientCredentialsToken({
+      tokenUrl,
+      clientId,
+      clientSecret,
+      scope: env.OAUTH2_CLIENT_CREDENTIALS_SCOPE,
+      audience: env.OAUTH2_CLIENT_CREDENTIALS_AUDIENCE,
+      authStyle: env.OAUTH2_CLIENT_CREDENTIALS_AUTH_STYLE
+    });
+
+    return `Bearer ${token}`;
+  }
+
+  throw new Error(
+    'No authentication configured. Provide one of: ' +
+    'BEARER_AUTH_TOKEN, BASIC_USERNAME/BASIC_PASSWORD, ' +
+    'OAUTH2_AUTHORIZATION_CODE_ACCESS_TOKEN, or OAUTH2_CLIENT_CREDENTIALS_*'
+  );
 }
 
-async function undeleteWorkforceUser(workforcePoolId, subjectId) {
-  const url = `https://iam.googleapis.com/v1/locations/global/workforcePools/${workforcePoolId}/subjects/${subjectId}:undelete`;
+/**
+ * Get the base URL/address for API calls
+ * @param {Object} params - Request parameters
+ * @param {string} [params.address] - Address from params
+ * @param {Object} context - Execution context
+ * @returns {string} Base URL
+ */
+function getBaseUrl(params, context) {
+  const env = context.environment || {};
+  const address = params?.address || env.ADDRESS;
 
-  console.log(`Undeleting workforce user: ${subjectId} from pool: ${workforcePoolId}`);
+  if (!address) {
+    throw new Error('No URL specified. Provide address parameter or ADDRESS environment variable');
+  }
 
-  // Make the POST request - authentication is handled externally
+  // Remove trailing slash if present
+  return address.endsWith('/') ? address.slice(0, -1) : address;
+}
+
+/**
+ * Google Undelete Workforce User Action
+ *
+ * Undeletes a user from Google Cloud Workforce Identity Federation using
+ * the Google Cloud IAM API.
+ */
+
+
+/**
+ * Helper function to undelete a workforce user
+ * @private
+ */
+async function undeleteWorkforceUser(workforcePoolId, subjectId, baseUrl, authHeader) {
+  // Construct the API URL
+  const url = `${baseUrl}/v1/locations/global/workforcePools/${workforcePoolId}/subjects/${subjectId}:undelete`;
+
+  // Make the POST request with authentication
   const response = await fetch(url, {
     method: 'POST',
     headers: {
+      'Authorization': authHeader,
       'Content-Type': 'application/json'
     }
   });
 
-  if (!response.ok) {
-    // Handle error response
-    let errorData = null;
-    try {
-      errorData = await response.json();
-    } catch {
-      // Response might not be JSON
-    }
-
-    const error = new Error(errorData?.error?.message || `HTTP ${response.status}`);
-    error.response = {
-      status: response.status,
-      data: errorData
-    };
-    throw error;
-  }
-
-  console.log(`Successfully undeleted workforce user: ${subjectId}`);
-
-  // Parse response data if available
-  let data = null;
+  // Read response body if available
+  let responseData = null;
   try {
     const text = await response.text();
     if (text) {
-      data = JSON.parse(text);
+      responseData = JSON.parse(text);
     }
   } catch {
     // Response might not be JSON or empty
   }
 
-  return data;
-}
-
-function validateInputs(params) {
-  if (!params.workforcePoolId || typeof params.workforcePoolId !== 'string' || params.workforcePoolId.trim() === '') {
-    throw new FatalError('Invalid or missing workforcePoolId parameter');
-  }
-
-  if (!params.subjectId || typeof params.subjectId !== 'string' || params.subjectId.trim() === '') {
-    throw new FatalError('Invalid or missing subjectId parameter');
-  }
+  return {
+    success: response.ok,
+    status: response.status,
+    data: responseData
+  };
 }
 
 var script = {
   /**
    * Main execution handler - undeletes a workforce user
    * @param {Object} params - Job input parameters
-   * @param {string} params.workforcePoolId - The workforce pool ID
    * @param {string} params.subjectId - The subject/user ID to undelete
+   * @param {string} params.workforcePoolId - The workforce pool ID
+   * @param {string} params.address - Full URL to Google IAM API (defaults to https://iam.googleapis.com)
    *
    * @param {Object} context - Execution context with secrets and environment
+   * @param {string} context.environment.ADDRESS - Default Google IAM API base URL
    *
    * The configured auth type will determine which of the following environment variables and secrets are available
    * @param {string} context.secrets.BEARER_AUTH_TOKEN
@@ -94,101 +225,123 @@ var script = {
    * @param {string} context.environment.OAUTH2_CLIENT_CREDENTIALS_TOKEN_URL
    *
    * @param {string} context.secrets.OAUTH2_AUTHORIZATION_CODE_ACCESS_TOKEN
-   * @param {string} context.secrets.OAUTH2_AUTHORIZATION_CODE_AUTHORIZATION_CODE
-   * @param {string} context.secrets.OAUTH2_AUTHORIZATION_CODE_CLIENT_SECRET
-   * @param {string} context.secrets.OAUTH2_AUTHORIZATION_CODE_REFRESH_TOKEN
-   * @param {string} context.environment.OAUTH2_AUTHORIZATION_CODE_AUTH_STYLE
-   * @param {string} context.environment.OAUTH2_AUTHORIZATION_CODE_AUTH_URL
-   * @param {string} context.environment.OAUTH2_AUTHORIZATION_CODE_CLIENT_ID
-   * @param {string} context.environment.OAUTH2_AUTHORIZATION_CODE_LAST_TOKEN_ROTATION_TIMESTAMP
-   * @param {string} context.environment.OAUTH2_AUTHORIZATION_CODE_REDIRECT_URI
-   * @param {string} context.environment.OAUTH2_AUTHORIZATION_CODE_SCOPE
-   * @param {string} context.environment.OAUTH2_AUTHORIZATION_CODE_TOKEN_LIFETIME_FREQUENCY
-   * @param {string} context.environment.OAUTH2_AUTHORIZATION_CODE_TOKEN_ROTATION_FREQUENCY
-   * @param {string} context.environment.OAUTH2_AUTHORIZATION_CODE_TOKEN_ROTATION_INTERVAL
-   * @param {string} context.environment.OAUTH2_AUTHORIZATION_CODE_TOKEN_URL
    *
    * @returns {Object} Job results
    */
   invoke: async (params, context) => {
-    console.log('Starting Google Undelete Workforce User action');
+    const { subjectId, workforcePoolId } = params;
 
+    console.log(`Starting Google Workforce user undeletion for subject ${subjectId} in pool ${workforcePoolId}`);
+
+    // Validate inputs - subjectId first to match parameter order
+    if (!subjectId || typeof subjectId !== 'string') {
+      throw new Error('Invalid or missing subjectId parameter');
+    }
+    if (!workforcePoolId || typeof workforcePoolId !== 'string') {
+      throw new Error('Invalid or missing workforcePoolId parameter');
+    }
+
+    // Get base URL using utils (with default for Google IAM API)
+    let baseUrl;
     try {
-      validateInputs(params);
+      baseUrl = getBaseUrl(params, context);
+    } catch (error) {
+      // Default to standard Google IAM API URL if not provided
+      baseUrl = 'https://iam.googleapis.com';
+    }
 
-      const { workforcePoolId, subjectId } = params;
+    // Get authorization header using utils
+    const authHeader = await getAuthorizationHeader(context);
 
-      console.log(`Processing workforce pool: ${workforcePoolId}`);
-      console.log(`Undeleting subject: ${subjectId}`);
+    // Make the API request to undelete the user
+    const result = await undeleteWorkforceUser(
+      workforcePoolId,
+      subjectId,
+      baseUrl,
+      authHeader
+    );
 
-      // Authentication is handled by the external system
-      try {
-        await undeleteWorkforceUser(workforcePoolId, subjectId);
+    // Handle the response
+    if (result.success) {
+      console.log(`Successfully undeleted workforce user ${subjectId}`);
 
-        const result = {
-          workforcePoolId,
-          subjectId,
-          undeleted: true,
-          alreadyActive: false,
+      return {
+        subjectId: subjectId,
+        workforcePoolId: workforcePoolId,
+        undeleted: true,
+        undeletedAt: new Date().toISOString()
+      };
+    }
+
+    // Handle specific error cases
+    const statusCode = result.status;
+
+    // 400 might mean user is already active (not deleted)
+    if (statusCode === 400) {
+      const errorMessage = result.data?.error?.message || '';
+      if (errorMessage.includes('not deleted') || errorMessage.includes('already active')) {
+        console.log(`Workforce user ${subjectId} is already active`);
+        return {
+          subjectId: subjectId,
+          workforcePoolId: workforcePoolId,
+          undeleted: false,
+          alreadyActive: true,
           undeletedAt: new Date().toISOString()
         };
-
-        console.log('Workforce user undeletion completed successfully');
-        return result;
-
-      } catch (error) {
-        if (error.response?.status === 404) {
-          throw new FatalError(`Workforce user ${subjectId} not found in pool ${workforcePoolId}`);
-        }
-
-        if (error.response?.status === 400) {
-          const errorMessage = error.response?.data?.error?.message || error.message;
-          if (errorMessage.includes('not deleted') || errorMessage.includes('already active')) {
-            console.log(`Workforce user ${subjectId} is already active`);
-            return {
-              workforcePoolId,
-              subjectId,
-              undeleted: false,
-              alreadyActive: true,
-              undeletedAt: new Date().toISOString()
-            };
-          }
-          throw new FatalError(`Bad request: ${errorMessage}`);
-        }
-
-        if (error.response?.status === 429 || (error.response?.status >= 500 && error.response?.status < 600)) {
-          throw new RetryableError(`Google Cloud API error (${error.response?.status}): ${error.message}`);
-        }
-
-        throw new FatalError(`Failed to undelete workforce user: ${error.message}`);
       }
-
-    } catch (error) {
-      console.error(`Error undeleting workforce user: ${error.message}`);
-
-      if (error instanceof RetryableError || error instanceof FatalError) {
-        throw error;
-      }
-
-      throw new FatalError(`Unexpected error: ${error.message}`);
     }
-  },
 
-  error: async (params, _context) => {
-    const { error } = params;
-    console.error(`Error handler invoked: ${error?.message}`);
+    // Handle other errors
+    let errorMessage = `Failed to undelete workforce user: ${statusCode}`;
+    if (result.data?.error?.message) {
+      errorMessage = `Failed to undelete workforce user: ${result.data.error.message}`;
+    } else if (typeof result.data === 'string') {
+      errorMessage = `Failed to undelete workforce user: ${result.data}`;
+    }
 
+    console.error('Google API error:', result.data);
+
+    const error = new Error(errorMessage);
+    error.statusCode = statusCode;
     throw error;
   },
 
+  /**
+   * Error recovery handler - framework handles retries by default
+   *
+   * @param {Object} params - Original params plus error information
+   * @param {Object} context - Execution context
+   *
+   * @returns {Object} Recovery results
+   */
+  error: async (params, _context) => {
+    const { error, subjectId, workforcePoolId } = params;
+    console.error(`Workforce user undeletion failed for ${subjectId} in pool ${workforcePoolId}: ${error.message}`);
+
+    // Framework handles retries for transient errors (429, 502, 503, 504)
+    // Just re-throw the error to let the framework handle it
+    throw error;
+  },
+
+  /**
+   * Graceful shutdown handler - cleanup when job is halted
+   *
+   * @param {Object} params - Original params plus halt reason
+   * @param {Object} context - Execution context
+   *
+   * @returns {Object} Cleanup results
+   */
   halt: async (params, _context) => {
-    const { reason, workforcePoolId, subjectId } = params;
-    console.log(`Job is being halted (${reason})`);
+    const { reason, subjectId, workforcePoolId } = params;
+    console.log(`Workforce user undeletion job is being halted (${reason}) for ${subjectId} in pool ${workforcePoolId}`);
+
+    // No cleanup needed for this simple operation
+    // The POST request either completed or didn't
 
     return {
-      workforcePoolId: workforcePoolId || 'unknown',
       subjectId: subjectId || 'unknown',
-      reason: reason || 'unknown',
+      workforcePoolId: workforcePoolId || 'unknown',
+      reason: reason,
       haltedAt: new Date().toISOString(),
       cleanupCompleted: true
     };
