@@ -1,17 +1,9 @@
 name: google-undelete-workforce-user
-description: Undelete a workforce user in Google Cloud IAM Workforce Identity
+description: Undelete a workforce user from Google Cloud IAM Workforce Identity
 
 # Input parameters for web form generation
 inputs:
-  workforce_pool_id:
-    type: text
-    description: The ID of the workforce pool containing the user
-    required: true
-    validation:
-      min: 1
-      max: 100
-
-  subject_id:
+  subjectId:
     type: text
     description: The subject ID of the workforce user to undelete
     required: true
@@ -19,34 +11,55 @@ inputs:
       min: 1
       max: 200
 
-  project_id:
+  workforcePoolId:
     type: text
-    description: Google Cloud project ID (if not specified, will be inferred from credentials)
-    required: false
+    description: The ID of the workforce pool containing the user
+    required: true
     validation:
       min: 1
       max: 100
 
+  address:
+    type: text
+    description: Google IAM API base URL (defaults to https://iam.googleapis.com if not provided)
+    required: false
+    validation:
+      min: 1
+      max: 255
+
 # Expected output structure
 outputs:
-  status:
-    type: text
-    description: Operation result (success, failed, recovered, halted)
-
-  workforce_pool_id:
+  workforcePoolId:
     type: text
     description: The workforce pool ID that was processed
 
-  subject_id:
+  subjectId:
     type: text
     description: The subject ID that was undeleted
 
-  undeleted_at:
+  undeleted:
+    type: boolean
+    description: Whether the user was successfully undeleted
+
+  alreadyActive:
+    type: boolean
+    description: Whether the user was already active (not deleted)
+
+  undeletedAt:
     type: datetime
     description: When the undeletion completed (ISO 8601)
 
-# Secret credentials required
+# Required secrets (configured at deployment time)
+# The configured auth type will determine which secrets are available
 secrets:
-  service_account_key:
-    description: Google Cloud service account key JSON (base64 encoded)
-    required: true
+  - BEARER_AUTH_TOKEN  # For Bearer authentication
+  - BASIC_USERNAME  # For Basic authentication
+  - BASIC_PASSWORD  # For Basic authentication
+  - OAUTH2_CLIENT_CREDENTIALS_CLIENT_SECRET  # For OAuth2 Client Credentials
+  - OAUTH2_AUTHORIZATION_CODE_ACCESS_TOKEN  # For OAuth2 Authorization Code
+
+# Runtime configuration
+runtime:
+  type: nodejs-22
+  timeout: 30s
+  memory: 128Mi
