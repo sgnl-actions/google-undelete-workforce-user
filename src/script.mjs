@@ -5,7 +5,7 @@
  * the Google Cloud IAM API.
  */
 
-import { getAuthorizationHeader, getBaseURL, resolveJSONPathTemplates} from '@sgnl-actions/utils';
+import { getAuthorizationHeader, getBaseURL} from '@sgnl-actions/utils';
 
 /**
  * Helper function to undelete a workforce user
@@ -71,15 +71,8 @@ export default {
    * @returns {Object} Job results
    */
   invoke: async (params, context) => {
-    const jobContext = context.data || {};
 
-    // Resolve JSONPath templates in params
-    const { result: resolvedParams, errors } = resolveJSONPathTemplates(params, jobContext);
-    if (errors.length > 0) {
-     console.warn('Template resolution errors:', errors);
-    }
-
-    const { subjectId, workforcePoolId } = resolvedParams;
+    const { subjectId, workforcePoolId } = params;
 
     console.log(`Starting Google Workforce user undeletion for subject ${subjectId} in pool ${workforcePoolId}`);
 
@@ -94,7 +87,7 @@ export default {
     // Get base URL using utils (with default for Google IAM API)
     let baseUrl;
     try {
-      baseUrl = getBaseURL(resolvedParams, context);
+      baseUrl = getBaseURL(params, context);
     } catch (error) {
       // Default to standard Google IAM API URL if not provided
       baseUrl = 'https://iam.googleapis.com';
