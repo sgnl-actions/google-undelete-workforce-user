@@ -5,7 +5,7 @@
  * the Google Cloud IAM API.
  */
 
-import { getAuthorizationHeader, getBaseURL} from '@sgnl-actions/utils';
+import { getAuthorizationHeader, getBaseURL } from '@sgnl-actions/utils';
 
 /**
  * Helper function to undelete a workforce user
