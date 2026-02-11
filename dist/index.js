@@ -9,6 +9,11 @@
  */
 
 /**
+ * User-Agent header value for all SGNL CAEP Hub requests.
+ */
+const SGNL_USER_AGENT = 'SGNL-CAEP-Hub/2.0';
+
+/**
  * Get OAuth2 access token using client credentials flow
  * @param {Object} config - OAuth2 configuration
  * @param {string} config.tokenUrl - Token endpoint URL
@@ -39,7 +44,8 @@ async function getClientCredentialsToken(config) {
 
   const headers = {
     'Content-Type': 'application/x-www-form-urlencoded',
-    'Accept': 'application/json'
+    'Accept': 'application/json',
+    'User-Agent': SGNL_USER_AGENT
   };
 
   if (authStyle === 'InParams') {
@@ -158,6 +164,21 @@ function getBaseURL(params, context) {
 }
 
 /**
+ * Create full headers object with Authorization and common headers
+ * @param {Object} context - Execution context with env and secrets
+ * @returns {Promise<Object>} Headers object with Authorization, Accept, Content-Type
+ */
+async function createAuthHeaders(context) {
+  const authHeader = await getAuthorizationHeader(context);
+  return {
+    'Authorization': authHeader,
+    'Accept': 'application/json',
+    'Content-Type': 'application/json',
+    'User-Agent': SGNL_USER_AGENT
+  };
+}
+
+/**
  * Google Undelete Workforce User Action
  *
  * Undeletes a user from Google Cloud Workforce Identity Federation using
@@ -169,17 +190,14 @@ function getBaseURL(params, context) {
  * Helper function to undelete a workforce user
  * @private
  */
-async function undeleteWorkforceUser(workforcePoolId, subjectId, baseUrl, authHeader) {
+async function undeleteWorkforceUser(workforcePoolId, subjectId, baseUrl, headers) {
   // Construct the API URL
   const url = `${baseUrl}/v1/locations/global/workforcePools/${workforcePoolId}/subjects/${subjectId}:undelete`;
 
   // Make the POST request with authentication
   const response = await fetch(url, {
     method: 'POST',
-    headers: {
-      'Authorization': authHeader,
-      'Content-Type': 'application/json'
-    }
+    headers
   });
 
   // Read response body if available
@@ -252,14 +270,14 @@ var script = {
     }
 
     // Get authorization header using utils
-    const authHeader = await getAuthorizationHeader(context);
+    const headers = await createAuthHeaders(context);
 
     // Make the API request to undelete the user
     const result = await undeleteWorkforceUser(
       workforcePoolId,
       subjectId,
       baseUrl,
-      authHeader
+      headers
     );
 
     // Handle the response
