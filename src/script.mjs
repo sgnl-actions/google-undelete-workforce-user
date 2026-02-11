@@ -5,23 +5,20 @@
  * the Google Cloud IAM API.
  */
 
-import { getAuthorizationHeader, getBaseURL} from '@sgnl-actions/utils';
+import { createAuthHeaders, getBaseURL} from '@sgnl-actions/utils';
 
 /**
  * Helper function to undelete a workforce user
  * @private
  */
-async function undeleteWorkforceUser(workforcePoolId, subjectId, baseUrl, authHeader) {
+async function undeleteWorkforceUser(workforcePoolId, subjectId, baseUrl, headers) {
   // Construct the API URL
   const url = `${baseUrl}/v1/locations/global/workforcePools/${workforcePoolId}/subjects/${subjectId}:undelete`;
 
   // Make the POST request with authentication
   const response = await fetch(url, {
     method: 'POST',
-    headers: {
-      'Authorization': authHeader,
-      'Content-Type': 'application/json'
-    }
+    headers
   });
 
   // Read response body if available
@@ -94,14 +91,14 @@ export default {
     }
 
     // Get authorization header using utils
-    const authHeader = await getAuthorizationHeader(context);
+    const headers = await createAuthHeaders(context);
 
     // Make the API request to undelete the user
     const result = await undeleteWorkforceUser(
       workforcePoolId,
       subjectId,
       baseUrl,
-      authHeader
+      headers
     );
 
     // Handle the response
