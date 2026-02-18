@@ -5,7 +5,7 @@
  * the Google Cloud IAM API.
  */
 
-import { createAuthHeaders, getBaseURL} from '@sgnl-actions/utils';
+import { createAuthHeaders, getBaseURL } from '@sgnl-actions/utils';
 
 /**
  * Helper function to undelete a workforce user
@@ -85,7 +85,7 @@ export default {
     let baseUrl;
     try {
       baseUrl = getBaseURL(params, context);
-    } catch (error) {
+    } catch {
       // Default to standard Google IAM API URL if not provided
       baseUrl = 'https://iam.googleapis.com';
     }

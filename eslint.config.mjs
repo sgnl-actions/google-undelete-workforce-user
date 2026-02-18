@@ -33,6 +33,8 @@ export default [
     files: ['tests/**/*.js', 'tests/**/*.mjs'],
     languageOptions: {
       globals: {
+        beforeAll: 'readonly',
+        afterAll: 'readonly',
         describe: 'readonly',
         test: 'readonly',
         expect: 'readonly',
