@@ -133,7 +133,7 @@ describe('Google Undelete Workforce User Script', () => {
       };
 
       let capturedUrl;
-      global.fetch = async (url, options) => {
+      global.fetch = async (url, _options) => {
         capturedUrl = url;
         return {
           ok: true,
